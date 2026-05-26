@@ -1,0 +1,245 @@
+import cors from 'cors';
+import dotenv from 'dotenv';
+import express from 'express';
+import { query } from './db.js';
+
+dotenv.config();
+
+const app = express();
+const port = Number(process.env.PORT || 3000);
+
+app.use(cors());
+app.use(express.json());
+
+app.get('/api/health', async (_req, res, next) => {
+  try {
+    await query('SELECT 1');
+    res.json({ ok: true });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get('/api/locations', async (_req, res, next) => {
+  try {
+    const { rows } = await query(
+      `SELECT id, name, area, notes
+       FROM locations
+       ORDER BY area, name`
+    );
+    res.json(rows);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get('/api/items', async (req, res, next) => {
+  try {
+    const search = String(req.query.search || '').trim();
+    const category = String(req.query.category || '').trim();
+
+    const filters = [];
+    const params = [];
+
+    if (search) {
+      params.push(`%${search.toLowerCase()}%`);
+      filters.push(`(
+        lower(items.name) LIKE $${params.length}
+        OR lower(items.part_number) LIKE $${params.length}
+        OR lower(items.manufacturer) LIKE $${params.length}
+        OR lower(items.notes) LIKE $${params.length}
+      )`);
+    }
+
+    if (category) {
+      params.push(category);
+      filters.push(`items.category = $${params.length}`);
+    }
+
+    const where = filters.length ? `WHERE ${filters.join(' AND ')}` : '';
+    const { rows } = await query(
+      `SELECT
+        items.id,
+        items.name,
+        items.category,
+        items.manufacturer,
+        items.part_number,
+        items.quantity,
+        items.minimum_quantity,
+        items.unit,
+        items.notes,
+        items.location_id,
+        locations.name AS location_name,
+        locations.area AS location_area
+       FROM items
+       LEFT JOIN locations ON locations.id = items.location_id
+       ${where}
+       ORDER BY items.category, items.name`,
+      params
+    );
+
+    res.json(rows);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get('/api/categories', async (_req, res, next) => {
+  try {
+    const { rows } = await query(
+      `SELECT DISTINCT category
+       FROM items
+       ORDER BY category`
+    );
+    res.json(rows.map((row) => row.category));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post('/api/items', async (req, res, next) => {
+  try {
+    const item = normalizeItem(req.body);
+    const { rows } = await query(
+      `INSERT INTO items
+        (name, category, manufacturer, part_number, quantity, minimum_quantity, unit, location_id, notes)
+       VALUES
+        ($1, $2, $3, $4, $5, $6, $7, NULLIF($8, '')::uuid, $9)
+       RETURNING *`,
+      [
+        item.name,
+        item.category,
+        item.manufacturer,
+        item.partNumber,
+        item.quantity,
+        item.minimumQuantity,
+        item.unit,
+        item.locationId,
+        item.notes
+      ]
+    );
+    res.status(201).json(rows[0]);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.patch('/api/items/:id', async (req, res, next) => {
+  try {
+    const item = normalizeItem(req.body);
+    const { rows } = await query(
+      `UPDATE items
+       SET
+        name = $1,
+        category = $2,
+        manufacturer = $3,
+        part_number = $4,
+        quantity = $5,
+        minimum_quantity = $6,
+        unit = $7,
+        location_id = NULLIF($8, '')::uuid,
+        notes = $9,
+        updated_at = now()
+       WHERE id = $10
+       RETURNING *`,
+      [
+        item.name,
+        item.category,
+        item.manufacturer,
+        item.partNumber,
+        item.quantity,
+        item.minimumQuantity,
+        item.unit,
+        item.locationId,
+        item.notes,
+        req.params.id
+      ]
+    );
+
+    if (!rows[0]) {
+      res.status(404).json({ error: 'Item not found' });
+      return;
+    }
+
+    res.json(rows[0]);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.patch('/api/items/:id/quantity', async (req, res, next) => {
+  try {
+    const quantity = Number(req.body.quantity);
+
+    if (!Number.isInteger(quantity) || quantity < 0) {
+      res.status(400).json({ error: 'Quantity must be a non-negative integer' });
+      return;
+    }
+
+    const { rows } = await query(
+      `UPDATE items
+       SET quantity = $1, updated_at = now()
+       WHERE id = $2
+       RETURNING *`,
+      [quantity, req.params.id]
+    );
+
+    if (!rows[0]) {
+      res.status(404).json({ error: 'Item not found' });
+      return;
+    }
+
+    res.json(rows[0]);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.use((error, _req, res, _next) => {
+  const status = error.status || 500;
+  res.status(status).json({
+    error: status === 500 ? 'Internal server error' : error.message
+  });
+});
+
+app.listen(port, () => {
+  console.log(`Inventory API listening on port ${port}`);
+});
+
+function normalizeItem(body) {
+  const item = {
+    name: String(body.name || '').trim(),
+    category: String(body.category || '').trim(),
+    manufacturer: String(body.manufacturer || '').trim(),
+    partNumber: String(body.partNumber || body.part_number || '').trim(),
+    quantity: Number(body.quantity ?? 0),
+    minimumQuantity: Number(body.minimumQuantity ?? body.minimum_quantity ?? 0),
+    unit: String(body.unit || 'each').trim(),
+    locationId: String(body.locationId || body.location_id || '').trim(),
+    notes: String(body.notes || '').trim()
+  };
+
+  if (!item.name) {
+    throw badRequest('Name is required');
+  }
+
+  if (!item.category) {
+    throw badRequest('Category is required');
+  }
+
+  if (!Number.isInteger(item.quantity) || item.quantity < 0) {
+    throw badRequest('Quantity must be a non-negative integer');
+  }
+
+  if (!Number.isInteger(item.minimumQuantity) || item.minimumQuantity < 0) {
+    throw badRequest('Minimum quantity must be a non-negative integer');
+  }
+
+  return item;
+}
+
+function badRequest(message) {
+  const error = new Error(message);
+  error.status = 400;
+  return error;
+}
