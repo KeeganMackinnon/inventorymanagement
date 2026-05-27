@@ -32,6 +32,33 @@ CREATE INDEX IF NOT EXISTS idx_items_category ON items (category);
 CREATE INDEX IF NOT EXISTS idx_items_cost ON items (cost);
 CREATE INDEX IF NOT EXISTS idx_items_part_number ON items (part_number);
 
+CREATE TABLE IF NOT EXISTS users (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  name text NOT NULL,
+  username text NOT NULL UNIQUE,
+  password_hash text NOT NULL,
+  role text NOT NULL DEFAULT 'member',
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  CHECK (role IN ('admin', 'member', 'viewer'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_users_username ON users (username);
+
+CREATE TABLE IF NOT EXISTS item_events (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  item_id uuid REFERENCES items(id) ON DELETE SET NULL,
+  item_name text NOT NULL DEFAULT '',
+  user_id uuid REFERENCES users(id) ON DELETE SET NULL,
+  event_type text NOT NULL,
+  before_data jsonb,
+  after_data jsonb,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_item_events_item_id ON item_events (item_id);
+CREATE INDEX IF NOT EXISTS idx_item_events_created_at ON item_events (created_at DESC);
+
 INSERT INTO locations (name, area, notes)
 VALUES
   ('Electrical Cabinet A3', 'Electrical', 'Deutsch and autosport wiring supplies'),

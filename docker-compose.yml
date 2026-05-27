@@ -6,7 +6,7 @@ services:
       POSTGRES_USER: fsae
       POSTGRES_PASSWORD: fsae_dev_password
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
@@ -22,8 +22,13 @@ services:
     environment:
       PORT: 3000
       DATABASE_URL: postgres://fsae:fsae_dev_password@db:5432/fsae_inventory
+      INVENTORY_PASSWORD: ${INVENTORY_PASSWORD:-owls_racing_shop}
+      AUTH_TOKEN_SECRET: ${AUTH_TOKEN_SECRET:-change_this_shop_secret}
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
+      ADMIN_NAME: ${ADMIN_NAME:-Owls Racing Admin}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-owls_racing_shop}
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
     depends_on:
       db:
         condition: service_healthy
