@@ -1,5 +1,5 @@
 import React from 'react';
-import { AlertTriangle, Boxes, Minus, Plus, Search, Wrench } from 'lucide-react';
+import { AlertTriangle, Boxes, Edit3, Minus, Plus, Search, Trash2, Wrench, X } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import owlsLogo from './assets/logo1.png';
@@ -28,6 +28,8 @@ function App() {
   const [form, setForm] = useState(emptyForm);
   const [status, setStatus] = useState('Loading inventory...');
   const [saving, setSaving] = useState(false);
+  const [deletingIds, setDeletingIds] = useState([]);
+  const [editingItemId, setEditingItemId] = useState('');
 
   useEffect(() => {
     loadReferenceData();
@@ -83,18 +85,44 @@ function App() {
     setSaving(true);
 
     try {
-      await fetchJson('/api/items', {
-        method: 'POST',
+      const path = editingItemId ? `/api/items/${editingItemId}` : '/api/items';
+      const method = editingItemId ? 'PATCH' : 'POST';
+
+      await fetchJson(path, {
+        method,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(form)
       });
       setForm(emptyForm);
+      setEditingItemId('');
       await Promise.all([loadReferenceData(), loadItems()]);
     } catch (error) {
       setStatus(error.message);
     } finally {
       setSaving(false);
     }
+  }
+
+  function startEditing(item) {
+    setEditingItemId(item.id);
+    setForm({
+      name: item.name,
+      category: item.category,
+      manufacturer: item.manufacturer || '',
+      partNumber: item.part_number || '',
+      quantity: item.quantity,
+      minimumQuantity: item.minimum_quantity,
+      unit: item.unit || 'each',
+      locationId: item.location_id || '',
+      notes: item.notes || ''
+    });
+    setStatus('');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  function cancelEditing() {
+    setEditingItemId('');
+    setForm(emptyForm);
   }
 
   async function adjustQuantity(item, delta) {
@@ -112,6 +140,26 @@ function App() {
           : candidate
       )
     );
+  }
+
+  async function deleteItem(item) {
+    const confirmed = window.confirm(`Delete ${item.name} from inventory?`);
+
+    if (!confirmed) {
+      return;
+    }
+
+    setDeletingIds((current) => [...current, item.id]);
+
+    try {
+      await fetchJson(`/api/items/${item.id}`, { method: 'DELETE' });
+      setItems((current) => current.filter((candidate) => candidate.id !== item.id));
+      await loadReferenceData();
+    } catch (error) {
+      setStatus(error.message);
+    } finally {
+      setDeletingIds((current) => current.filter((id) => id !== item.id));
+    }
   }
 
   return (
@@ -133,7 +181,20 @@ function App() {
 
       <section className="workspace">
         <aside className="entry-panel">
-          <h2>Add Part</h2>
+          <div className="form-heading">
+            <h2>{editingItemId ? 'Edit Part' : 'Add Part'}</h2>
+            {editingItemId ? (
+              <button
+                aria-label="Cancel editing"
+                className="ghost-action"
+                title="Cancel editing"
+                type="button"
+                onClick={cancelEditing}
+              >
+                <X size={16} />
+              </button>
+            ) : null}
+          </div>
           <form onSubmit={saveItem} className="item-form">
             <label>
               Name
@@ -216,10 +277,17 @@ function App() {
                 placeholder="Crimper, mating family, vendor, car subsystem..."
               />
             </label>
-            <button className="primary-action" disabled={saving} type="submit">
-              <Plus size={18} />
-              {saving ? 'Saving' : 'Add Item'}
-            </button>
+            <div className="form-actions">
+              <button className="primary-action" disabled={saving} type="submit">
+                {editingItemId ? <Edit3 size={18} /> : <Plus size={18} />}
+                {saving ? 'Saving' : editingItemId ? 'Save Changes' : 'Add Item'}
+              </button>
+              {editingItemId ? (
+                <button className="secondary-action" type="button" onClick={cancelEditing}>
+                  Cancel
+                </button>
+              ) : null}
+            </div>
           </form>
         </aside>
 
@@ -251,6 +319,7 @@ function App() {
               <span>Category</span>
               <span>Location</span>
               <span>Stock</span>
+              <span>Actions</span>
             </div>
             {items.map((item) => (
               <article className="table-row" role="row" key={item.id}>
@@ -281,6 +350,25 @@ function App() {
                     <Plus size={16} />
                   </button>
                   <small>min {item.minimum_quantity}</small>
+                </div>
+                <div className="action-cell">
+                  <button
+                    aria-label={`Edit ${item.name}`}
+                    className="edit-action"
+                    title="Edit item"
+                    onClick={() => startEditing(item)}
+                  >
+                    <Edit3 size={16} />
+                  </button>
+                  <button
+                    aria-label={`Delete ${item.name}`}
+                    className="danger-action"
+                    disabled={deletingIds.includes(item.id)}
+                    title="Delete item"
+                    onClick={() => deleteItem(item)}
+                  >
+                    <Trash2 size={16} />
+                  </button>
                 </div>
               </article>
             ))}

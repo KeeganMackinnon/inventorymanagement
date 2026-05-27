@@ -195,6 +195,26 @@ app.patch('/api/items/:id/quantity', async (req, res, next) => {
   }
 });
 
+app.delete('/api/items/:id', async (req, res, next) => {
+  try {
+    const { rows } = await query(
+      `DELETE FROM items
+       WHERE id = $1
+       RETURNING id`,
+      [req.params.id]
+    );
+
+    if (!rows[0]) {
+      res.status(404).json({ error: 'Item not found' });
+      return;
+    }
+
+    res.status(204).send();
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.use((error, _req, res, _next) => {
   const status = error.status || 500;
   res.status(status).json({

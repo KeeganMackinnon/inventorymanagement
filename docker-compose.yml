@@ -4,7 +4,7 @@ services:
     environment:
       POSTGRES_DB: fsae_inventory
       POSTGRES_USER: fsae
-      POSTGRES_PASSWORD: i_h8_friends
+      POSTGRES_PASSWORD: fsae_dev_password
     ports:
       - "5432:5432"
     volumes:
